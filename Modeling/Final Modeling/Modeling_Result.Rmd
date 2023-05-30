@@ -1,0 +1,61 @@
+---
+title: "Modeling Result"
+author: "DonghyunPark"
+date: "2023-05-30"
+output: html_document
+---
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(showtext)
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Modeling Result
+
+```{r}
+Modeling_Result <- as.data.frame(cbind(c("LR", "LR(Ridge)", "LR(Lasso)", "LR(Full Interaction)", "LR(Less Interaction)", "KNN", "Random Forest", "SVM(Linear)", "SVM(Sigmoid)", "SVM(Polynomial)", "SVM(Radial)", "xGBoost", "adaBoost", "LDA", "Naive Bayes"), c(0.70226, 0.70962, 0.70896, 0.55674, 0.54664, 0.70193, 0.71258, 0.70894, 0.70593, 0.70561, 0.70629, 0.71393, 0.69261, 0.70063, 0.57860)))%>%
+  rename("Model" = "V1", "Accuracy" = "V2")
+
+
+Modeling_Result$Accuracy <- as.numeric(Modeling_Result$Accuracy)
+Modeling_Result <- Modeling_Result %>%
+  arrange(desc(Accuracy))
+
+ggplot(data = Modeling_Result, aes(x = reorder(Model, -Accuracy), y = Accuracy - 0.5, fill = Accuracy)) +
+  geom_bar(stat = "identity") + 
+  coord_flip()+
+  geom_text(aes(label = Accuracy), hjust = 1.25, size = 3, color = "white")+
+  scale_fill_continuous(type = "gradient") +
+  scale_y_continuous(breaks = c(0,0.05,0.10,0.15,0.20,0.250), labels = c("0.5", "0.55","0.6","0.65","0.7","0.75"))+
+  theme(panel.background = element_blank(), axis.line = element_line(colour = "black"), plot.title = element_text(size = 12, face = "bold", hjust = 0.5), text = element_text(size = 10))+
+  ylab("Accuracy")+
+  xlab("")+
+  ggtitle("Model Accuracy")
+```
+
+```{r}
+Modeling_Result_Seed <- as.data.frame(cbind(c("LR", "LR(Ridge)", "LR(Lasso)", "KNN", "Random Forest", "SVM(Linear)", "SVM(Sigmoid)", "SVM(Polynomial)", "SVM(Radial)", "xGBoost", "LDA"), c(0.69756, 0.70945, 0.70885, 0.70320, 0.71172, 0.70234, 0.69910, 0.70027, 0.70137, 0.70010, 0.70294), c(0.0079892, 0.0065059, 0.0055050, 0.0068985, 0.0045557, 0.0047059, 0.0081476, 0.0047556, 0.0084313, 0.0079153, 0.0078102), c(0.69992, 0.70961, 0.70862, 0.70568, 0.71213, 0.70209, 0.69976, 0.70009, 0.70310, 0.70045, 0.70128)))%>%
+  rename("Model" = "V1", "Mean" = "V2", "Sd" = "V3", "Median" = "V4")
+
+Modeling_Result_Seed$Mean <- as.numeric(Modeling_Result_Seed$Mean)
+Modeling_Result_Seed$Sd <- as.numeric(Modeling_Result_Seed$Sd)
+Modeling_Result_Seed$Median <- as.numeric(Modeling_Result_Seed$Median)
+```
+
+```{r}
+ggplot(data = Modeling_Result_Seed, aes(x = reorder(Model, -Mean))) +
+  geom_errorbar(aes(ymax = Mean + 1.96 * Sd / sqrt(10), ymin = Mean - 1.96 * Sd / sqrt(10)), alpha = 0.5)+
+  geom_point(aes(y = Median), alpha = 0.5)+
+  geom_point(data = Modeling_Result %>% filter(Model %in% c("LR", "LR(Ridge)", "LR(Lasso)", "KNN", "Random Forest", "SVM(Linear)", "SVM(Sigmoid)", "SVM(Polynomial)", "SVM(Radial)", "xGBoost", "LDA")), aes(x = Model, y = Accuracy), shape = 4)+
+  geom_point(aes(y = Mean), color = "red", alpha = 1) +
+  coord_flip()+
+  theme(panel.background = element_blank(), axis.line = element_line(colour = "black"), plot.title = element_text(size = 12, face = "bold", hjust = 0.5), plot.subtitle = element_text(size = 10, hjust = 0.5), text = element_text(size = 10))+
+  ylab("Accuracy (95% CI)")+
+  xlab("")+
+  ggtitle("Model Accuracy", subtitle = "10 Different CV partitions")
+```
+
+
