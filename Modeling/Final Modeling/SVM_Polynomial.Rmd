@@ -1,0 +1,236 @@
+---
+title: "SVM"
+author: "DonghyunPark"
+date: "2023-05-28"
+output: html_document
+---
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(showtext)
+library(e1071)
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Load Dataset
+
+```{r}
+data <- read.csv("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Dataset/train_set_encoded.csv", fileEncoding = "euc-kr")
+```
+
+# Checking Dataset
+
+```{r}
+data %>%
+  na.omit() %>%
+  dim()
+```
+
+## Pre processing
+
+```{r}
+data <- data[, 1:45]
+data$target <- as.factor(data$target)
+```
+
+```{r}
+# 표준화 함수
+normalizer <- function(x) {
+  return((x-mean(x))/sd(x))
+}
+```
+
+```{r}
+for(i in 1:45){
+  if(i == 4) next
+  data[,i] = normalizer(data[,i])
+}
+```
+
+# Modeling PseudoCode
+
+```{r, warning = FALSE}
+n = nrow(data)
+K = 10 # 10-fold CV
+
+# 설정하려는 Seed 총 개수
+Seed_Num = 10
+  
+# Seed, parameter 별로 일단 모두 저장
+Accuracy_SVMP <- vector(mode = "list", length = Seed_Num)
+FPR_SVMP <- vector(mode = "list", length = Seed_Num)
+FNR_SVMP <- vector(mode = "list", length = Seed_Num)
+F1_SVMP <- vector(mode = "list", length = Seed_Num)
+
+# Parameter grid 설정
+cost_grid <- c(0.01,0.1,1,4,16)
+gamma_grid <- c(0.0001, 0.001, 0.01, 0.1)
+degree_grid <- c(3,5)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  print("seed")
+  print(seed)
+  set.seed(seed)
+  # Parameter 별로 For loop
+  for(cost in cost_grid){
+    for(gamma in gamma_grid){
+      for(degree in degree_grid){
+        print("cost")
+        print(cost)
+        print("gamma")
+        print(gamma)
+        print("degree")
+        print(degree)
+        
+        for(CV in 1:K){
+        ########################################################################################
+        # CV generation. Train : Test를 9:1로 나눔 (이때의 train, test는 validation approach)  #
+        ########################################################################################
+          print("CV")
+          print(CV)
+        
+          CV_index <- split(sample(1:n), rep(1:K, length.out = n))
+          train <- data[-CV_index[[CV]], ] # Train set
+          train_index <- c(1:n) 
+          train_index <- train_index[-CV_index[[CV]]] # Train set의 index (필요할 경우 사용)
+          test <- data[CV_index[[CV]], ] # Test set
+          test_rowNum <- nrow(test) # Test set row Numbers (필요할 경우 사용))
+        
+        #################################################################
+        # Modeling and Prediction. Update Accuracy, FNR, FPR, F1 score  #
+        #################################################################
+        # Train 데이터셋이 필요한 경우
+          Model <- svm(target ~ ., data = train, cost = cost, gamma = gamma, degree = degree, kernel = "polynomial")
+        
+        
+        # Prediction (0, 1로 나오는 경우)
+          pred <- predict(Model, newdata = test)
+        
+        # Update Scores
+          Accuracy_SVMP[[seed]] <- c(Accuracy_SVMP[[seed]], mean(pred == test$target))
+          FPR_SVMP[[seed]] <- c(FPR_SVMP[[seed]], mean((pred != test$target) & (test$target == 0)) / mean(test$target == 0))
+          FNR_SVMP[[seed]] <- c(FNR_SVMP[[seed]], mean((pred != test$target) & (test$target == 1)) / mean(test$target == 1))
+          F1_SVMP[[seed]] <- c(F1_SVMP[[seed]], 2*(mean((pred==test$target)&(test$target==1))/(mean(pred==1))*mean((pred==test$target)&(test$target==1))/(mean(test$target==1))) / (mean((pred==test$target)&(test$target==1))/(mean(pred==1))+mean((pred==test$target)&(test$target==1))/(mean(test$target==1))))
+        }
+      }
+    }
+  }
+}
+```
+
+```{r}
+# Seed, parameter 별로 CV에 대해 평균내어 모두 저장
+CVAccuracy_SVMP <- vector(mode = "list", length = Seed_Num)
+CVFPR_SVMP <- vector(mode = "list", length = Seed_Num)
+CVFNR_SVMP <- vector(mode = "list", length = Seed_Num)
+CVF1_SVMP <- vector(mode = "list", length = Seed_Num)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  # Parameter 별로 For loop
+  for(param1 in 1:length(cost_grid)){
+    for(param2 in 1:length(gamma_grid)){
+      for(param3 in 1:length(degree_grid)){
+        CVAccuracy_SVMP[[seed]] <- c(CVAccuracy_SVMP[[seed]], mean(Accuracy_SVMP[[seed]][1:K + K * (param3 - 1) + K * length(degree_grid) * (param2 - 1) + K * length(degree_grid) * length(gamma_grid) * (param1 - 1)]))
+        CVFPR_SVMP[[seed]] <- c(CVFPR_SVMP[[seed]], mean(FPR_SVMP[[seed]][1:K + K * (param3 - 1) + K * length(degree_grid) * (param2 - 1) + K * length(degree_grid) * length(gamma_grid) * (param1 - 1)]))
+        CVFNR_SVMP[[seed]] <- c(CVFNR_SVMP[[seed]], mean(FNR_SVMP[[seed]][1:K + K * (param3 - 1) + K * length(degree_grid) * (param2 - 1) + K * length(degree_grid) * length(gamma_grid) * (param1 - 1)]))
+        CVF1_SVMP[[seed]] <- c(CVF1_SVMP[[seed]], mean(F1_SVMP[[seed]][1:K + K * (param3 - 1) + K * length(degree_grid) * (param2 - 1) + K * length(degree_grid) * length(gamma_grid) * (param1 - 1)]))
+      }
+    }
+  }
+}
+```
+
+## Accuracy
+
+```{r}
+SVMP_Accuracy <- as.data.frame(CVAccuracy_SVMP)
+colnames(SVMP_Accuracy) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+SVMP_Accuracy <- as.data.frame(t(as.matrix(SVMP_Accuracy)))
+
+SVMP_Accuracy
+```
+
+```{r}
+SVMP_Accuracy <- SVMP_Accuracy%>%
+  gather(key = "Parameter", value = "Accuracy")%>%
+  mutate(degree = degree_grid[((row_number()-1)%/%K)%%(length(degree_grid)) + 1])%>%
+  mutate(gamma = gamma_grid[((row_number()-1)%/%(K*length(degree_grid)))%%(length(gamma_grid))+1])%>%
+  mutate(cost = cost_grid[(((row_number()-1)%/%(K*length(degree_grid)*length(gamma_grid)))%%(length(cost_grid)))+1])%>%
+  mutate(CV = (row_number()-1)%%K + 1)
+
+
+SVMP_Accuracy %>%
+  arrange(desc(Accuracy)) %>%
+  head(5)
+```
+
+```{r}
+SVMP_Accuracy%>%
+  filter(Accuracy > 0.6)%>%
+  ggplot()+
+  geom_boxplot(aes(x = Accuracy, y = Parameter), alpha = 0.2)+
+  theme_bw()+
+  ggtitle("SVM Polynomial", subtitle = "Accuracy")
+```
+
+
+## F1 score
+
+```{r}
+SVMP_F1 <- as.data.frame(CVF1_SVMP)
+colnames(SVMP_F1) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+SVMP_F1 <- as.data.frame(t(as.matrix(SVMP_F1)))
+
+SVMP_F1
+```
+
+```{r}
+SVMP_F1 <- SVMP_F1 %>%
+  gather(key = "Parameter", value = "F1")%>%
+  mutate(degree = degree_grid[((row_number()-1)%/%K)%%(length(degree_grid)) + 1])%>%
+  mutate(gamma = gamma_grid[((row_number()-1)%/%(K*length(degree_grid)))%%(length(gamma_grid))+1])%>%
+  mutate(cost = cost_grid[(((row_number()-1)%/%(K*length(degree_grid)*length(gamma_grid)))%%(length(cost_grid)))+1])%>%
+  mutate(CV = (row_number()-1)%%K + 1)
+
+SVMP_F1 %>%
+  arrange(desc(F1)) %>%
+  head(5)
+```
+
+```{r}
+SVMP_F1%>%
+  ggplot()+
+  geom_boxplot(aes(x = F1, y = Parameter))+
+  theme_bw()+
+  ggtitle("SVM Polynomial", subtitle = "F1 score")
+```
+
+# Conclusion
+
+```{r}
+for(seed in 1:10){
+  for(i in 1:2){
+    CVAccuracy_SVMP[[seed]] <- c(CVAccuracy_SVMP[[seed]], mean(Accuracy_SVMP[[seed]][1:K + K * (i - 1)]))
+    CVFPR_SVMP[[seed]] <- c(CVFPR_SVMP[[seed]], mean(FPR_SVMP[[seed]][1:K + K * (i - 1)]))
+    CVFNR_SVMP[[seed]] <- c(CVFNR_SVMP[[seed]], mean(FNR_SVMP[[seed]][1:K + K * (i - 1)]))
+    CVF1_SVMP[[seed]] <- c(CVF1_SVMP[[seed]], mean(F1_SVMP[[seed]][1:K + K * (i - 1)]))
+  }
+}
+
+
+```
+
+
+Accuracy : gamma = 0.01, cost = 1
+
+- seed 1 : 70.561%
+
+- seed 1~10 : Mean : 0.70027 Sd : 0.0047556 Median : 0.70009
+
+F1 score : gamma = 0.1, cost = 0.1
+
+- seed 1 : 0.68892
+
+- seed 1~10 : Mean : 0.69220 Sd : 0.00800 Median : 0.69435

@@ -1,0 +1,201 @@
+---
+title: "SVM Linear"
+author: "DonghyunPark"
+date: "2023-05-28"
+output: html_document
+---
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(showtext)
+library(e1071)
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Load Dataset
+
+```{r}
+data <- read.csv("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Dataset/train_set_encoded.csv", fileEncoding = "euc-kr")
+```
+
+# Checking Dataset
+
+```{r}
+data %>%
+  na.omit() %>%
+  dim()
+```
+
+## Pre processing
+
+```{r}
+data <- data[, 1:45]
+data$target <- as.factor(data$target)
+```
+
+```{r}
+# 표준화 함수
+normalizer <- function(x) {
+  return((x-mean(x))/sd(x))
+}
+```
+
+```{r}
+for(i in 1:45){
+  if(i == 4) next
+  data[,i] = normalizer(data[,i])
+}
+```
+
+# SVM Linear
+
+```{r, warning = FALSE}
+n = nrow(data)
+K = 10 # 10-fold CV
+
+# 설정하려는 Seed 총 개수
+Seed_Num = 10
+  
+# Seed, parameter 별로 일단 모두 저장
+Accuracy_SVML <- vector(mode = "list", length = Seed_Num)
+FPR_SVML <- vector(mode = "list", length = Seed_Num)
+FNR_SVML <- vector(mode = "list", length = Seed_Num)
+F1_SVML <- vector(mode = "list", length = Seed_Num)
+
+# Parameter grid 설정
+cost_grid <- c(0.001,0.01,0.1,1,4)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  print("seed")
+  print(seed)
+  set.seed(seed)
+  
+  # Parameter 별로 For loop
+  for(cost in cost_grid){
+      
+      print("cost")
+      print(cost)
+      
+      for(CV in 1:K){
+        ########################################################################################
+        # CV generation. Train : Test를 9:1로 나눔 (이때의 train, test는 validation approach)  #
+        ########################################################################################
+        print("CV")
+        print(CV)
+        
+        CV_index <- split(sample(1:n), rep(1:K, length.out = n))
+        train <- data[-CV_index[[CV]], ] # Train set
+        train_index <- c(1:n) 
+        train_index <- train_index[-CV_index[[CV]]] # Train set의 index (필요할 경우 사용)
+        test <- data[CV_index[[CV]], ] # Test set
+        test_rowNum <- nrow(test) # Test set row Numbers (필요할 경우 사용))
+        
+        #################################################################
+        # Modeling and Prediction. Update Accuracy, FNR, FPR, F1 score  #
+        #################################################################
+        # Train 데이터셋이 필요한 경우
+        Model <- svm(target ~ ., data = train, cost = cost, kernel = "linear")
+        
+        
+        # Prediction (0, 1로 나오는 경우)
+        pred <- predict(Model, newdata = test)
+        
+        # Update Scores
+        Accuracy_SVML[[seed]] <- c(Accuracy_SVML[[seed]], mean(pred == test$target))
+        FPR_SVML[[seed]] <- c(FPR_SVML[[seed]], mean((pred != test$target) & (test$target == 0)) / mean(test$target == 0))
+        FNR_SVML[[seed]] <- c(FNR_SVML[[seed]], mean((pred != test$target) & (test$target == 1)) / mean(test$target == 1))
+        F1_SVML[[seed]] <- c(F1_SVML[[seed]], 2*(mean((pred==test$target)&(test$target==1))/(mean(pred==1))*mean((pred==test$target)&(test$target==1))/(mean(test$target==1))) / (mean((pred==test$target)&(test$target==1))/(mean(pred==1))+mean((pred==test$target)&(test$target==1))/(mean(test$target==1))))
+      }
+      
+    
+  }
+}
+```
+
+```{r}
+# Seed, parameter 별로 CV에 대해 평균내어 모두 저장
+CVAccuracy_SVML <- vector(mode = "list", length = Seed_Num)
+CVFPR_SVML <- vector(mode = "list", length = Seed_Num)
+CVFNR_SVML <- vector(mode = "list", length = Seed_Num)
+CVF1_SVML <- vector(mode = "list", length = Seed_Num)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  # Parameter 별로 For loop
+  for(param1 in 1:length(cost_grid)){
+      CVAccuracy_SVML[[seed]] <- c(CVAccuracy_SVML[[seed]], mean(Accuracy_SVML[[seed]][1:K + K * (param1 - 1)]))
+      CVFPR_SVML[[seed]] <- c(CVFPR_SVML[[seed]], mean(FPR_SVML[[seed]][1:K + K * (param1 - 1)]))
+      CVFNR_SVML[[seed]] <- c(CVFNR_SVML[[seed]], mean(FNR_SVML[[seed]][1:K + K * (param1 - 1)]))
+      CVF1_SVML[[seed]] <- c(CVF1_SVML[[seed]], mean(F1_SVML[[seed]][1:K + K * (param1 - 1)]))
+    
+  }
+}
+```
+
+## Accuracy
+
+```{r}
+SVML_Accuracy <- as.data.frame(CVAccuracy_SVML)
+colnames(SVML_Accuracy) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+SVML_Accuracy <- as.data.frame(t(as.matrix(SVML_Accuracy)))
+
+SVML_Accuracy
+```
+
+```{r}
+SVML_Accuracy <- SVML_Accuracy%>%
+  gather(key = "Parameter", value = "Accuracy")%>%
+  mutate(cost = cost_grid[((row_number()-1)%/%K)+1])%>%
+  mutate(CV = (row_number()-1)%%K + 1)
+
+SVML_Accuracy%>%
+  filter(Accuracy > 0.6)%>%
+  ggplot()+
+  geom_boxplot(aes(x = Accuracy, y = Parameter), alpha = 0.2)+
+  geom_text(aes(x = Accuracy, y = Parameter, label = cost), stat = "summary", hjust = 3, size = 3)+
+  theme_bw()+
+  ggtitle("SVM Linear", subtitle = "Accuracy")
+```
+
+
+## F1 score
+
+```{r}
+SVML_F1 <- as.data.frame(CVF1_SVML)
+colnames(SVML_F1) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+SVML_F1 <- as.data.frame(t(as.matrix(SVML_F1)))
+
+SVML_F1
+```
+
+```{r}
+SVML_F1 <- SVML_F1%>%
+  gather(key = "Parameter", value = "F1")%>%
+  mutate(cost = cost_grid[((row_number()-1)%/%K)+1])%>%
+  mutate(CV = (row_number()-1)%%K + 1)
+
+SVML_F1%>%
+  filter(F1 > 0.5)%>%
+  ggplot()+
+  geom_boxplot(aes(x = F1, y = Parameter), alpha = 0.2)+
+  geom_text(aes(x = F1, y = Parameter, label = cost), stat = "summary", hjust = 3, size = 3)+
+  theme_bw()+
+  ggtitle("SVM Linear", subtitle = "F1")
+```
+
+# Conclusion
+
+Accuracy : cost = 0.01
+
+- seed 1 : 71.127%
+
+- seed 1~10 : Mean 0.70267, Standard deviation 0.0077935, Median 0.70276
+
+F1 score : cost = 1
+
+- seed 1 : 0.69212
+
+- seed 1~10 : Mean 0.68823, Standard deviation  0.0068463, Median 0.69060
+
+
