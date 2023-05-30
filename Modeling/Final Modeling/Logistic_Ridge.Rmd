@@ -1,0 +1,235 @@
+---
+title: "Logistic Ridge"
+author: "DonghyunPark"
+date: "2023-05-27"
+output: html_document
+---
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(showtext)
+library(GGally)
+library(lubridate)
+library(corrplot)
+library(glmnet)
+library(randomForest)
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Load Dataset
+
+```{r}
+data <- read.csv("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Dataset/train_set_encoded.csv", fileEncoding = "euc-kr")
+
+data$target <- as.factor(data$target)
+```
+
+# Checking Dataset
+
+```{r}
+data %>%
+  na.omit() %>%
+  dim()
+```
+
+
+# Logistic Ridge
+
+```{r, warning = FALSE}
+n = nrow(data)
+K = 10 # 10-fold CV
+Prediction_index = 4
+
+# 설정하려는 Seed 총 개수
+Seed_Num = 10
+  
+# Seed, parameter 별로 일단 모두 저장
+Accuracy_LRR <- vector(mode = "list", length = Seed_Num)
+FPR_LRR <- vector(mode = "list", length = Seed_Num)
+FNR_LRR <- vector(mode = "list", length = Seed_Num)
+F1_LRR <- vector(mode = "list", length = Seed_Num)
+
+# Parameter grid 설정
+threshold_grid <- seq(from = 0, to = 1, length.out = 51)
+lambda_grid <- 10^seq(2, -5, length = 71) # 10의 exponent로 grid 생성
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  print("seed")
+  print(seed)
+  set.seed(seed)
+  
+  # Parameter 별로 For loop
+  for(threshold in threshold_grid){
+      for(CV in 1:K){
+        ########################################################################################
+        # CV generation. Train : Test를 9:1로 나눔 (이때의 train, test는 validation approach)  #
+        ########################################################################################
+        CV_index <- split(sample(1:n), rep(1:K, length.out = n))
+        train <- data[-CV_index[[CV]], ] # Train set
+        train_index <- c(1:n) 
+        train_index <- train_index[-CV_index[[CV]]] # Train set의 index (필요할 경우 사용)
+        test <- data[CV_index[[CV]], ] # Test set
+        test_rowNum <- nrow(test) # Test set row Numbers (필요할 경우 사용))
+        
+        #################################################################
+        # Modeling and Prediction. Update Accuracy, FNR, FPR, F1 score  #
+        #################################################################
+        Model <- glmnet(as.matrix(train[, -Prediction_index]), train$target, family = "binomial", alpha = 0, lambda = lambda_grid)
+        
+        
+        for(lambda_ind in 1:length(lambda_grid)){
+          
+          prob_pred <- predict(Model, s = lambda_grid[lambda_ind], newx = as.matrix(test[, -Prediction_index]), type = "response")
+          pred <- rep(0, test_rowNum)
+          pred[prob_pred > threshold] <- 1
+        
+          # Update Scores
+          Accuracy_LRR[[seed]] <- c(Accuracy_LRR[[seed]], mean(pred == test$target))
+          FPR_LRR[[seed]] <- c(FPR_LRR[[seed]], mean((pred != test$target) & (test$target == 0)) / mean(test$target == 0))
+          FNR_LRR[[seed]] <- c(FNR_LRR[[seed]], mean((pred != test$target) & (test$target == 1)) / mean(test$target == 1))
+          F1_LRR[[seed]] <- c(F1_LRR[[seed]], 2*(mean((pred==test$target)&(test$target==1))/(mean(pred==1))*mean((pred==test$target)&(test$target==1))/(mean(test$target==1))) / (mean((pred==test$target)&(test$target==1))/(mean(pred==1))+mean((pred==test$target)&(test$target==1))/(mean(test$target==1))))  
+        }
+      }
+    
+  }
+}
+```
+
+## CV meaning process
+
+```{r}
+# Seed, parameter 별로 CV에 대해 평균내어 모두 저장
+CVAccuracy_LRR <- vector(mode = "list", length = Seed_Num)
+CVFPR_LRR <- vector(mode = "list", length = Seed_Num)
+CVFNR_LRR <- vector(mode = "list", length = Seed_Num)
+CVF1_LRR <- vector(mode = "list", length = Seed_Num)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  # Parameter 별로 For loop
+  for(param1 in 1:length(threshold_grid)){
+    for(param2 in 1:length(lambda_grid)){
+      CVAccuracy_LRR[[seed]] <- c(CVAccuracy_LRR[[seed]], mean(Accuracy_LRR[[seed]][param2 + (0:(K-1)) * length(lambda_grid) + (param1-1) * K * length(lambda_grid)]))
+      CVFPR_LRR[[seed]] <- c(CVFPR_LRR[[seed]], mean(FPR_LRR[[seed]][param2 + (0:(K-1)) * length(lambda_grid) + (param1-1) * K * length(lambda_grid)]))
+      CVFNR_LRR[[seed]] <- c(CVFNR_LRR[[seed]], mean(FNR_LRR[[seed]][param2 + (0:(K-1)) * length(lambda_grid) + (param1-1) * K * length(lambda_grid)]))
+      CVF1_LRR[[seed]] <- c(CVF1_LRR[[seed]], mean(F1_LRR[[seed]][param2 + (0:(K-1)) * length(lambda_grid) + (param1-1) * K * length(lambda_grid)]))
+    }
+  }
+}
+```
+
+## Accuracy
+
+```{r}
+LRR_Accuracy <- as.data.frame(CVAccuracy_LRR)
+colnames(LRR_Accuracy) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+LRR_Accuracy <- as.data.frame(t(as.matrix(LRR_Accuracy)))
+
+LRR_Accuracy
+```
+
+```{r}
+LRR_Accuracy <- LRR_Accuracy %>%
+  gather(key = "Parameter", value = "Accuracy")%>%
+  mutate(lambda = lambda_grid[((row_number()-1)%/%K)%%(length(lambda_grid))+1])%>%
+  mutate(threshold = threshold_grid[(((row_number()-1)%/%K)%/%(length(lambda_grid)))+1])%>%
+  mutate(CV = (row_number()-1)%%K + 1)
+                              
+
+LRR_Accuracy_lambdaCV <- LRR_Accuracy %>%
+  group_by(lambda, CV)%>%
+  summarise(Accuracy = max(Accuracy))%>%
+  mutate(lambda = log(lambda, base = 10))
+
+LRR_Accuracy_lambda <- LRR_Accuracy_lambdaCV%>%
+  group_by(lambda)%>%
+  summarise(Accuracy = mean(Accuracy))
+```
+
+```{r}
+ggplot() +
+  geom_boxplot(data = LRR_Accuracy_lambdaCV, mapping = aes(x = lambda, y = Accuracy, group = lambda), alpha = 0.5, size = 0.2) +
+  geom_line(data = LRR_Accuracy_lambda, mapping = aes(x = lambda, y = Accuracy), color = "blue")+
+  theme_bw()+
+  xlab("Log lambda")+
+  ggtitle("Ridge", subtitle = "Accuracy")
+```
+
+```{r}
+ggplot() +
+  geom_boxplot(data = LRR_Accuracy_lambdaCV %>% filter(lambda < -1), mapping = aes(x = lambda, y = Accuracy, group = lambda), alpha = 0.5, size = 0.2) +
+  geom_line(data = LRR_Accuracy_lambda %>% filter(lambda < -1), mapping = aes(x = lambda, y = Accuracy), color = "blue")+
+  theme_bw()+
+  xlab("Log lambda")+
+  ggtitle("Ridge", subtitle = "Accuracy")
+```
+
+```{r}
+LRR_Accuracy_lambda[which.max(LRR_Accuracy_lambda$Accuracy),]
+```
+
+
+## F1 score
+
+```{r}
+LRR_F1 <- as.data.frame(CVF1_LRR)
+colnames(LRR_F1) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+LRR_F1 <- as.data.frame(t(as.matrix(LRR_F1)))
+
+LRR_F1
+```
+
+```{r}
+LRR_F1 <- LRR_F1 %>%
+  gather(key = "Parameter", value = "F1")%>%
+  mutate(lambda = lambda_grid[((row_number()-1)%/%K)%%(length(lambda_grid))+1])%>%
+  mutate(threshold = threshold_grid[(((row_number()-1)%/%K)%/%(length(lambda_grid)))+1])%>%
+  mutate(CV = (row_number()-1)%%K + 1)
+                              
+
+LRR_F1_lambdaCV <- LRR_F1 %>%
+  group_by(lambda, CV)%>%
+  summarise(F1 = max(F1, na.rm = TRUE))%>%
+  mutate(lambda = log(lambda, base = 10))
+
+
+LRR_F1_lambda <- LRR_F1_lambdaCV%>%
+  group_by(lambda)%>%
+  summarise(F1 = mean(F1))
+```
+
+```{r}
+ggplot() +
+  geom_boxplot(data = LRR_F1_lambdaCV, mapping = aes(x = lambda, y = F1, group = lambda), alpha = 0.5, size = 0.2) +
+  geom_line(data = LRR_F1_lambda, mapping = aes(x = lambda, y = F1), color = "blue")+
+  theme_bw()+
+  xlab("Log lambda")
+  ggtitle("Ridge", subtitle = "F1 score")
+```
+
+```{r}
+ggplot() +
+  geom_boxplot(data = LRR_F1_lambdaCV %>% filter(lambda < -2), mapping = aes(x = lambda, y = F1, group = lambda), alpha = 0.5, size = 0.2) +
+  geom_line(data = LRR_F1_lambda %>% filter(lambda < -2), mapping = aes(x = lambda, y = F1), color = "blue")+
+  theme_bw()+
+  xlab("Log lambda")+
+  ggtitle("Ridge", subtitle = "F1 score")
+```
+
+# Conclusion
+
+- F1 score
+
+Regularized 된 term이 없을 때 최대 : 즉, 일반적인 LR을 택하면 됨.
+
+- Accuracy
+
+lambda = -2.8	에서 best performance
+
+Seed 1 : 0.70962
+
+Seed 1~10 : average 0.70945, standard deviation 0.0065059, median 0.70961
+
+
+

@@ -1,0 +1,210 @@
+---
+title: "Logistic_interaction"
+author: "DonghyunPark"
+date: "2023-05-27"
+output: html_document
+---
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(showtext)
+library(GGally)
+library(lubridate)
+library(corrplot)
+library(glmnet)
+library(randomForest)
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Load Dataset
+
+```{r}
+data <- read.csv("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Dataset/train_set_encoded.csv", fileEncoding = "euc-kr")
+
+data$target <- as.factor(data$target)
+```
+
+# Checking Dataset
+
+```{r}
+data %>%
+  na.omit() %>%
+  dim()
+```
+
+
+## Seperate Continuous, Factor Columns
+
+```{r}
+noncorp_cols <- data %>%
+  select(-target) %>%
+  select_if(!stringr::str_detect(names(.), "industry")) %>%
+  names()
+
+corp_cols <- data %>%
+  select(-target) %>%
+  select_if(stringr::str_detect(names(.), "industry")) %>%
+  names()
+
+noncorp_terms <- paste0(noncorp_cols, collapse = " + ")
+corp_terms <- paste0(corp_cols, collapse = " + ")
+interaction_noncorp_terms <- combn(noncorp_cols, 2, FUN=function(x) paste0(x[1], ":", x[2]))
+interaction_noncorp_terms <- paste0(interaction_noncorp_terms, collapse=" + ")
+interaction_corp_noncorp_terms <- paste0(paste(noncorp_cols, corp_cols, sep = ":"), collapse = "+")
+```
+
+# Logistic Interaction (industry - continuous, continuous ~ continuous)
+
+```{r, warning = FALSE}
+n = nrow(data)
+K = 10 # 10-fold CV
+Prediction_index = 4
+
+# 설정하려는 Seed 총 개수
+Seed_Num = 10
+  
+# Seed, parameter 별로 일단 모두 저장
+Accuracy_LRI <- vector(mode = "list", length = Seed_Num)
+FPR_LRI <- vector(mode = "list", length = Seed_Num)
+FNR_LRI <- vector(mode = "list", length = Seed_Num)
+F1_LRI <- vector(mode = "list", length = Seed_Num)
+
+# Parameter grid 설정
+threshold_grid <- seq(from = 0, to = 1, length.out = 51)
+
+# Formula 만들기
+formula = paste("target ~ ", corp_terms, "+", noncorp_terms, "+", interaction_noncorp_terms, "+", interaction_corp_noncorp_terms)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  print("seed")
+  print(seed)
+  set.seed(seed)
+  
+    for(CV in 1:K){
+        ########################################################################################
+        # CV generation. Train : Test를 9:1로 나눔 (이때의 train, test는 validation approach)  #
+        ########################################################################################
+        CV_index <- split(sample(1:n), rep(1:K, length.out = n))
+        train <- data[-CV_index[[CV]], ] # Train set
+        train_index <- c(1:n) 
+        train_index <- train_index[-CV_index[[CV]]] # Train set의 index (필요할 경우 사용)
+        test <- data[CV_index[[CV]], ] # Test set
+        test_rowNum <- nrow(test) # Test set row Numbers (필요할 경우 사용))
+        
+        print("CV")
+        print(CV)
+        
+        #################################################################
+        # Modeling and Prediction. Update Accuracy, FNR, FPR, F1 score  #
+        #################################################################
+        Model <- glm(formula = as.formula(formula), data = data, subset = train_index, family = binomial(link = "logit"))
+        
+        # Parameter 별로 For loop
+      for(threshold in threshold_grid){
+      
+        # Prediction이 확률로 나오는 경우
+        prob_pred <- predict(Model, newdata = test, type = "response")
+        pred <- rep(0, test_rowNum)
+        pred[prob_pred > threshold] <- 1
+        
+        # Update Scores
+        Accuracy_LRI[[seed]] <- c(Accuracy_LRI[[seed]], mean(pred == test$target))
+        FPR_LRI[[seed]] <- c(FPR_LRI[[seed]], mean((pred != test$target) & (test$target == 0)) / mean(test$target == 0))
+        FNR_LRI[[seed]] <- c(FNR_LRI[[seed]], mean((pred != test$target) & (test$target == 1)) / mean(test$target == 1))
+        F1_LRI[[seed]] <- c(F1_LRI[[seed]], 2*(mean((pred==test$target)&(test$target==1))/(mean(pred==1))*mean((pred==test$target)&(test$target==1))/(mean(test$target==1))) / (mean((pred==test$target)&(test$target==1))/(mean(pred==1))+mean((pred==test$target)&(test$target==1))/(mean(test$target==1))))  
+        
+      }
+    
+  }
+}
+```
+
+## CV meaning process
+
+```{r}
+# Seed, parameter 별로 CV에 대해 평균내어 모두 저장
+CVAccuracy_LRI <- vector(mode = "list", length = Seed_Num)
+CVFPR_LRI <- vector(mode = "list", length = Seed_Num)
+CVFNR_LRI <- vector(mode = "list", length = Seed_Num)
+CVF1_LRI <- vector(mode = "list", length = Seed_Num)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  # Parameter 별로 For loop
+  for(param1 in 1:length(threshold_grid)){
+      CVAccuracy_LRI[[seed]] <- c(CVAccuracy_LRI[[seed]], mean(Accuracy_LRI[[seed]][param1 + length(threshold_grid)*(0:(K-1))]))
+      CVFPR_LRI[[seed]] <- c(CVFPR_LRI[[seed]], mean(FPR_LRI[[seed]][param1 + length(threshold_grid)*(0:(K-1))]))
+      CVFNR_LRI[[seed]] <- c(CVFNR_LRI[[seed]], mean(FNR_LRI[[seed]][param1 + length(threshold_grid)*(0:(K-1))]))
+      CVF1_LRI[[seed]] <- c(CVF1_LRI[[seed]], mean(F1_LRI[[seed]][param1 + length(threshold_grid)*(0:(K-1))]))
+  }
+}
+```
+
+## Accuracy
+
+```{r}
+LRI_Accuracy <- as.data.frame(CVAccuracy_LRI)
+colnames(LRI_Accuracy) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+LRI_Accuracy <- as.data.frame(t(as.matrix(LRI_Accuracy)))
+
+LRI_Accuracy
+```
+
+```{r}
+LRI_Accuracy <- LRI_Accuracy%>%
+  gather("V1","V2","V3","V4","V5","V6","V7","V8","V9","V10","V11","V12","V13","V14","V15","V16","V17","V18","V19","V20", "V21", "V22","V23","V24","V25","V26","V27", "V28", "V29", "V30","V31","V32","V33","V34","V35","V36","V37","V38","V39","V40","V41","V42","V43","V44","V45","V46","V47","V48","V49","V50","V51", key = "threshold", value = "Accuracy")
+
+
+LRI_Accuracy_mean <- LRI_Accuracy%>%
+  group_by(threshold)%>%
+  summarise(Accuracy_mean = mean(Accuracy)) 
+
+LRI_Accuracy_mean%>%
+  arrange(desc(Accuracy_mean))%>%
+  head(10)
+```
+
+```{r}
+ggplot()+
+  geom_boxplot(data = LRI_Accuracy%>%
+  filter(threshold %in% c("V22","V23","V24","V25","V26","V27","V28","V29","V30","V31")), aes(x = Accuracy, y = threshold, color = threshold))+
+  geom_point(data = LRI_Accuracy_mean%>%
+               filter(threshold %in% c("V22","V23","V24","V25","V26","V27","V28","V29","V30","V31")), aes(x = Accuracy_mean, y = threshold))
+```
+
+## F1 score
+
+```{r}
+LRI_F1 <- as.data.frame(CVF1_LRI)
+colnames(LRI_F1) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+LRI_F1 <- as.data.frame(t(as.matrix(LRI_F1)))
+
+LRI_F1
+```
+
+```{r}
+LRI_F1 <- LRI_F1%>%
+  gather("V1","V2","V3","V4","V5","V6","V7","V8","V9","V10","V11","V12","V13","V14","V15","V16","V17","V18","V19","V20", "V21", "V22","V23","V24","V25","V26","V27", "V28", "V29", "V30","V31","V32","V33","V34","V35","V36","V37","V38","V39","V40","V41","V42","V43","V44","V45","V46","V47","V48","V49","V50","V51", key = "threshold", value = "F1")
+
+
+LRI_F1_mean <- LRI_F1%>%
+  group_by(threshold)%>%
+  summarise(F1_mean = mean(F1, na.rm = TRUE)) 
+
+LRI_F1_mean%>%
+  arrange(desc(F1_mean))%>%
+  head(10)
+```
+
+```{r}
+ggplot()+
+  geom_boxplot(data = LRI_F1%>%
+  filter(threshold %in% c("V13","V14","V15","V16","V17","V18","V19","V20","V21","V22")), aes(x = F1, y = threshold, color = threshold))+
+  geom_point(data = LRI_F1_mean%>%
+               filter(threshold %in% c("V13","V14","V15","V16","V17","V18","V19","V20","V21","V22")), aes(x = F1_mean, y = threshold))
+```
+
+# Conclusion
+
+Interaction 고려할 필요가 없다. Overfitting이 너무 크게 발생한다. (Industry * bind 할 시) : 이 경우 계산해보면 55^2 - 10^2 = 2400 정도로 Overfitting 발생을 확인.
