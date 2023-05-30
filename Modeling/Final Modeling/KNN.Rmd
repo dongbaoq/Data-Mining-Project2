@@ -1,0 +1,199 @@
+---
+title: "KNN"
+author: "DonghyunPark"
+date: "2023-05-27"
+output: html_document
+---
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(showtext)
+library(GGally)
+library(lubridate)
+library(corrplot)
+library(glmnet)
+library(class)
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Load Dataset
+
+```{r}
+data <- read.csv("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Dataset/train_set_encoded.csv", fileEncoding = "euc-kr")
+```
+
+# Checking Dataset
+
+```{r}
+data %>%
+  na.omit() %>%
+  dim()
+```
+
+
+# KNN
+
+## Pre processing
+
+```{r}
+data <- data[, 1:45]
+data$target <- as.factor(data$target)
+```
+
+```{r}
+# 표준화 함수
+normalizer <- function(x) {
+  return((x-mean(x))/sd(x))
+}
+```
+
+```{r}
+for(i in 1:45){
+  if(i == 4) next
+  data[,i] = normalizer(data[,i])
+}
+```
+
+## Model fitting
+
+```{r, warning = FALSE}
+n = nrow(data)
+K = 10 # 10-fold CV
+Prediction_index = 4
+
+# 설정하려는 Seed 총 개수
+Seed_Num = 10
+  
+# Seed, parameter 별로 일단 모두 저장
+Accuracy_KNN <- vector(mode = "list", length = Seed_Num)
+FPR_KNN <- vector(mode = "list", length = Seed_Num)
+FNR_KNN <- vector(mode = "list", length = Seed_Num)
+F1_KNN <- vector(mode = "list", length = Seed_Num)
+
+# Parameter grid
+K_grid = c(5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 150, 200, 300, 400)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  print("seed")
+  print(seed)
+  set.seed(seed)
+  
+  # Parameter 별로 For loop
+  for(k in K_grid){
+      print("K")
+      print(k)
+      
+      for(CV in 1:K){
+        ########################################################################################
+        # CV generation. Train : Test를 9:1로 나눔 (이때의 train, test는 validation approach)  #
+        ########################################################################################
+        CV_index <- split(sample(1:n), rep(1:K, length.out = n))
+        train <- data[-CV_index[[CV]], ] # Train set
+        train_index <- c(1:n) 
+        train_index <- train_index[-CV_index[[CV]]] # Train set의 index (필요할 경우 사용)
+        test <- data[CV_index[[CV]], ] # Test set
+        test_rowNum <- nrow(test) # Test set row Numbers (필요할 경우 사용))
+        
+        #################################################################
+        # Modeling and Prediction. Update Accuracy, FNR, FPR, F1 score  #
+        #################################################################
+        pred <- knn(train = train[,-Prediction_index], test = test[,-Prediction_index], cl = train$target, k = k)
+        
+        
+        # Update Scores
+        Accuracy_KNN[[seed]] <- c(Accuracy_KNN[[seed]], mean(pred == test$target))
+        FPR_KNN[[seed]] <- c(FPR_KNN[[seed]], mean((pred != test$target) & (test$target == 0)) / mean(test$target == 0))
+        FNR_KNN[[seed]] <- c(FNR_KNN[[seed]], mean((pred != test$target) & (test$target == 1)) / mean(test$target == 1))
+        F1_KNN[[seed]] <- c(F1_KNN[[seed]], 2*(mean((pred==test$target)&(test$target==1))/(mean(pred==1))*mean((pred==test$target)&(test$target==1))/(mean(test$target==1))) / (mean((pred==test$target)&(test$target==1))/(mean(pred==1))+mean((pred==test$target)&(test$target==1))/(mean(test$target==1))))  
+        
+      }
+    
+  }
+}
+```
+
+## CV meaning process
+
+```{r}
+# Seed, parameter 별로 CV에 대해 평균내어 모두 저장
+CVAccuracy_KNN <- vector(mode = "list", length = Seed_Num)
+CVFPR_KNN <- vector(mode = "list", length = Seed_Num)
+CVFNR_KNN <- vector(mode = "list", length = Seed_Num)
+CVF1_KNN <- vector(mode = "list", length = Seed_Num)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  # Parameter 별로 For loop
+  for(param1 in 1:length(K_grid)){
+      CVAccuracy_KNN[[seed]] <- c(CVAccuracy_KNN[[seed]], mean(Accuracy_KNN[[seed]][1:K + K * (param1 - 1)]))
+      CVFPR_KNN[[seed]] <- c(CVFPR_KNN[[seed]], mean(FPR_KNN[[seed]][1:K + K * (param1 - 1)]))
+      CVFNR_KNN[[seed]] <- c(CVFNR_KNN[[seed]], mean(FNR_KNN[[seed]][1:K + K * (param1 - 1)]))
+      CVF1_KNN[[seed]] <- c(CVF1_KNN[[seed]], mean(F1_KNN[[seed]][1:K + K * (param1 - 1)]))
+  }
+}
+```
+
+## Accuracy
+
+```{r}
+KNN_Accuracy <- as.data.frame(CVAccuracy_KNN)
+colnames(KNN_Accuracy) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+KNN_Accuracy <- as.data.frame(t(as.matrix(KNN_Accuracy)))
+
+KNN_Accuracy
+```
+
+```{r}
+KNN_Accuracy <- KNN_Accuracy %>%
+  gather("V1","V2","V3","V4","V5","V6","V7","V8","V9","V10","V11","V12","V13","V14","V15", key = "K", value = "Accuracy")
+
+KNN_Accuracy$K <- factor(KNN_Accuracy$K, levels = c("V1","V2","V3","V4","V5","V6","V7","V8","V9","V10","V11","V12","V13","V14","V15"))
+
+KNN_Accuracy%>%
+  ggplot()+
+  geom_boxplot(aes(x = Accuracy, color = K))+
+  ylab("K")+
+  theme_bw()+
+  ggtitle("KNN", subtitle = "Accuracy")
+```
+
+## F1 score
+
+```{r}
+KNN_F1 <- as.data.frame(CVF1_KNN)
+colnames(KNN_F1) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+KNN_F1 <- as.data.frame(t(as.matrix(KNN_F1)))
+
+KNN_F1
+```
+
+```{r}
+KNN_F1 <- KNN_F1 %>%
+  gather("V1","V2","V3","V4","V5","V6","V7","V8","V9","V10","V11","V12","V13","V14","V15", key = "K", value = "F1")
+
+KNN_F1$K <- factor(KNN_F1$K, levels = c("V1","V2","V3","V4","V5","V6","V7","V8","V9","V10","V11","V12","V13","V14","V15"))
+
+KNN_F1 %>%
+  ggplot()+
+  geom_boxplot(aes(x = F1, color = K))+
+  ylab("K")+
+  theme_bw()+
+  ggtitle("KNN", subtitle = "F1 score")
+```
+
+# Conclusion
+
+K = 60에서 Best performance
+
+Seed 1 : 
+
+- Accuracy 70.193%
+
+- F1 score 0.70654
+
+Seed from 1~10 : 
+
+- Accuracy average 0.70320, standard deviation 0.0068985, median 0.702781
+
+- F1 score average 0.70315, standard deviation 0.0086958, median 0.70568
