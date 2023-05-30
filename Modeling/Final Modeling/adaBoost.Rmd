@@ -1,0 +1,182 @@
+---
+title: "adaBoost"
+author: "DonghyunPark"
+date: "2023-05-29"
+output: html_document
+---
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(showtext)
+library(JOUSBoost)
+
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Load Dataset
+
+```{r}
+data <- read.csv("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Dataset/train_set_encoded.csv", fileEncoding = "euc-kr")
+
+data$target <- 2 * data$target - 1
+```
+
+
+```{r}
+n = nrow(data)
+K = 10 # 10-fold CV
+
+# 설정하려는 Seed 총 개수
+Seed_Num = 10
+  
+# Seed, parameter 별로 일단 모두 저장
+Accuracy_adB <- vector(mode = "list", length = Seed_Num)
+FPR_adB <- vector(mode = "list", length = Seed_Num)
+FNR_adB <- vector(mode = "list", length = Seed_Num)
+F1_adB <- vector(mode = "list", length = Seed_Num)
+
+# Parameter grid 설정
+depth_grid <- c(2,3,5,8)
+nround_grid <- c(100, 500)
+
+
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  print("seed")
+  print(seed)
+  set.seed(seed)
+  
+  # Parameter 별로 For loop
+  for(depth in depth_grid){
+    for(nround in nround_grid){
+      print("depth")
+      print(depth)
+      print("nround")
+      print(nround)
+      
+          for(CV in 1:K){
+        ########################################################################################
+        # CV generation. Train : Test를 9:1로 나눔 (이때의 train, test는 validation approach)  #
+        ########################################################################################
+            CV_index <- split(sample(1:n), rep(1:K, length.out = n))
+            train <- data[-CV_index[[CV]], ] # Train set
+            train_index <- c(1:n) 
+            train_index <- train_index[-CV_index[[CV]]] # Train set의 index (필요할 경우 사용)
+            test <- data[CV_index[[CV]], ] # Test set
+            test_rowNum <- nrow(test) # Test set row Numbers (필요할 경우 사용))
+        
+        #################################################################
+        # Modeling and Prediction. Update Accuracy, FNR, FPR, F1 score  #
+        #################################################################
+            Model <- adaboost(X = as.matrix(train[,-4]), y = train$target, tree_depth = depth, n_rounds = nround, verbose = FALSE)
+            
+            
+            
+            pred <- predict(Model, X = as.matrix(test[,-4]))
+              
+            # Update Scores
+            Accuracy_adB[[seed]] <- c(Accuracy_adB[[seed]], mean(pred == test$target))
+            FPR_adB[[seed]] <- c(FPR_adB[[seed]], mean((pred != test$target) & (test$target == 0)) / mean(test$target == 0))
+            FNR_adB[[seed]] <- c(FNR_adB[[seed]], mean((pred != test$target) & (test$target == 1)) / mean(test$target == 1))
+            F1_adB[[seed]] <- c(F1_adB[[seed]], 2*(mean((pred==test$target)&(test$target==1))/(mean(pred==1))*mean((pred==test$target)&(test$target==1))/(mean(test$target==1))) / (mean((pred==test$target)&(test$target==1))/(mean(pred==1))+mean((pred==test$target)&(test$target==1))/(mean(test$target==1))))
+            
+          }
+        
+      
+    }
+  }
+}
+```
+
+```{r}
+# Seed, parameter 별로 CV에 대해 평균내어 모두 저장
+CVAccuracy_adB <- vector(mode = "list", length = Seed_Num)
+CVFPR_adB <- vector(mode = "list", length = Seed_Num)
+CVFNR_adB <- vector(mode = "list", length = Seed_Num)
+CVF1_adB <- vector(mode = "list", length = Seed_Num)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  # Parameter 별로 For loop
+  for(param1 in 1:length(depth_grid)){
+    for(param2 in 1:length(nround_grid)){
+      CVAccuracy_adB[[seed]] <- c(CVAccuracy_adB[[seed]], mean(Accuracy_adB[[seed]][1:K + K * (param2 - 1) + K * length(param2_grid) * (param1 - 1)]))
+      CVFPR_adB[[seed]] <- c(CVFPR_adB[[seed]], mean(FPR_adB[[seed]][1:K + K * (param2 - 1) + K * length(param2_grid) * (param1 - 1)]))
+      CVFNR_adB[[seed]] <- c(CVFNR_adB[[seed]], mean(FNR_adB[[seed]][1:K + K * (param2 - 1) + K * length(param2_grid) * (param1 - 1)]))
+      CVF1_adB[[seed]] <- c(CVF1_adB[[seed]], mean(F1_adB[[seed]][1:K + K * (param2 - 1) + K * length(param2_grid) * (param1 - 1)]))
+    }
+  }
+}
+```
+
+
+# Accuracy
+
+```{r}
+adB_Accuracy <- as.data.frame(CVAccuracy_adB)
+colnames(adB_Accuracy) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+adB_Accuracy <- as.data.frame(t(as.matrix(adB_Accuracy)))
+```
+
+```{r}
+adB_Accuracy <- adB_Accuracy%>%
+  gather(key = "Parameter", value = "Accuracy")%>%
+  mutate(depth = depth_grid[((row_number()-1)%/%(K*length(nround_grid)))%%(length(depth_grid))+1])%>%
+  mutate(nround = nround_grid[((row_number()-1)%/%K)%%(length(nround_grid))+1])%>%
+  mutate(CV = (row_number()-1)%%K + 1)
+
+
+adB_Accuracy
+```
+
+
+```{r}
+adB_Accuracy%>%
+  ggplot()+
+  geom_boxplot(aes(x = Accuracy, y = Parameter))+
+  theme_bw()+
+  ggtitle("adaBoost Linear", subtitle = "Accuracy")
+```
+
+# F1
+
+```{r}
+adB_F1 <- as.data.frame(CVF1_adB)
+colnames(adB_F1) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+adB_F1 <- as.data.frame(t(as.matrix(adB_F1)))
+```
+
+```{r}
+adB_F1 <- adB_F1%>%
+  gather(key = "Parameter", value = "F1")%>%
+  mutate(depth = depth_grid[((row_number()-1)%/%(K*length(nround_grid)))%%(length(depth_grid))+1])%>%
+  mutate(nround = nround_grid[((row_number()-1)%/%K)%%(length(nround_grid))+1])%>%
+  mutate(CV = (row_number()-1)%%K + 1)
+
+
+adB_F1
+```
+
+```{r}
+adB_F1%>%
+  ggplot()+
+  geom_boxplot(aes(x = F1, y = Parameter))+
+  theme_bw()+
+  ggtitle("adaBoost Linear", subtitle = "F score")
+```
+
+
+# Conclusion
+
+Accuracy : depth = 3, around = 500
+
+- Seed 1 : 69.261%
+
+- Seed 1~10 : Mean : 0.68853 Sd : 0.0076971 Median : 0.69144
+
+F score : depth = 2, around = 100
+
+- Seed 1 : 0.68442
+
+- Seed 1~10 : Mean : 0.68133 Sd : 0.012639 Median : 0.68121

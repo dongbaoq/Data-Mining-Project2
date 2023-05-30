@@ -1,0 +1,302 @@
+---
+title: "xGBoost"
+author: "DonghyunPark"
+date: "2023-05-29"
+output: html_document
+---
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(showtext)
+library(xgboost)
+
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Load Dataset
+
+```{r}
+data <- read.csv("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Dataset/train_set_encoded.csv", fileEncoding = "euc-kr")
+
+```
+
+# Modeling
+
+```{r}
+n = nrow(data)
+K = 10 # 10-fold CV
+
+# 설정하려는 Seed 총 개수
+Seed_Num = 10
+  
+# Seed, parameter 별로 일단 모두 저장
+Accuracy_xGB <- vector(mode = "list", length = Seed_Num)
+FPR_xGB <- vector(mode = "list", length = Seed_Num)
+FNR_xGB <- vector(mode = "list", length = Seed_Num)
+F1_xGB <- vector(mode = "list", length = Seed_Num)
+
+# Parameter grid 설정
+threshold_grid <- seq(from = 0.3, to = 0.7, by = 0.02)
+eta_grid <- c(0.01, 0.05, seq(from = 0.1, to = 0.4, by = 0.1))
+max_depth_grid <- c(4,6,8,10)
+gamma_grid <- c(0,5)
+subsample_grid <- c(0.5, 0.8, 1)
+
+
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  print("seed")
+  print(seed)
+  set.seed(seed)
+  
+  # Parameter 별로 For loop
+  
+  for(eta in eta_grid){
+    for(max_depth in max_depth_grid){
+      for(gamma in gamma_grid){
+        for(subsample in subsample_grid){
+          for(CV in 1:K){
+        ########################################################################################
+        # CV generation. Train : Test를 9:1로 나눔 (이때의 train, test는 validation approach)  #
+        ########################################################################################
+            CV_index <- split(sample(1:n), rep(1:K, length.out = n))
+            train <- data[-CV_index[[CV]], ] # Train set
+            train_index <- c(1:n) 
+            train_index <- train_index[-CV_index[[CV]]] # Train set의 index (필요할 경우 사용)
+            test <- data[CV_index[[CV]], ] # Test set
+            test_rowNum <- nrow(test) # Test set row Numbers (필요할 경우 사용))
+        
+        #################################################################
+        # Modeling and Prediction. Update Accuracy, FNR, FPR, F1 score  #
+        #################################################################
+            Model <- xgboost(data = as.matrix(train[,-4]), label = train$target, max.depth = max_depth, eta = eta, nthread = 2, nrounds = 2, subsample = subsample, gamma = gamma, objective = "binary:logistic", verbose = 0)
+            
+            for(threshold in threshold_grid){
+              prob_pred <- predict(Model, newdata = as.matrix(test[,-4]))
+              pred <- rep(0, test_rowNum)
+              pred[prob_pred > threshold] <- 1
+              
+              # Update Scores
+              Accuracy_xGB[[seed]] <- c(Accuracy_xGB[[seed]], mean(pred == test$target))
+              FPR_xGB[[seed]] <- c(FPR_xGB[[seed]], mean((pred != test$target) & (test$target == 0)) / mean(test$target == 0))
+              FNR_xGB[[seed]] <- c(FNR_xGB[[seed]], mean((pred != test$target) & (test$target == 1)) / mean(test$target == 1))
+              F1_xGB[[seed]] <- c(F1_xGB[[seed]], 2*(mean((pred==test$target)&(test$target==1))/(mean(pred==1))*mean((pred==test$target)&(test$target==1))/(mean(test$target==1))) / (mean((pred==test$target)&(test$target==1))/(mean(pred==1))+mean((pred==test$target)&(test$target==1))/(mean(test$target==1))))
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+```{r}
+# Seed, parameter 별로 CV에 대해 평균내어 모두 저장
+CVAccuracy_xGB <- vector(mode = "list", length = Seed_Num)
+CVFPR_xGB <- vector(mode = "list", length = Seed_Num)
+CVFNR_xGB <- vector(mode = "list", length = Seed_Num)
+CVF1_xGB <- vector(mode = "list", length = Seed_Num)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  # Parameter 별로 For loop
+  for(param1 in 1:length(eta_grid)){
+    for(param2 in 1:length(max_depth_grid)){
+      for(param3 in 1:length(gamma_grid)){
+        for(param4 in 1:length(subsample_grid)){
+          for(param5 in 1:length(threshold_grid)){
+            CVAccuracy_xGB[[seed]] <- c(CVAccuracy_xGB[[seed]], mean(Accuracy_xGB[[seed]][param5 + (0:(K-1)) * length(threshold_grid) + length(threshold_grid)*K*param4 + length(threshold_grid)*K*length(subsample_grid)*param3 + length(threshold_grid)*K*length(subsample_grid)*length(gamma_grid)*param2 + length(threshold_grid)*K*length(subsample_grid)*length(gamma_grid)*length(max_depth_grid)*param1]))
+            CVFPR_xGB[[seed]] <- c(CVFPR_xGB[[seed]], mean(FPR_xGB[[seed]][param5 + (0:(K-1)) * length(threshold_grid) + length(threshold_grid)*K*param4 + length(threshold_grid)*K*length(subsample_grid)*param3 + length(threshold_grid)*K*length(subsample_grid)*length(gamma_grid)*param2 + length(threshold_grid)*K*length(subsample_grid)*length(gamma_grid)*length(max_depth_grid)*param1]))
+            CVFNR_xGB[[seed]] <- c(CVFNR_xGB[[seed]], mean(FNR_xGB[[seed]][param5 + (0:(K-1)) * length(threshold_grid) + length(threshold_grid)*K*param4 + length(threshold_grid)*K*length(subsample_grid)*param3 + length(threshold_grid)*K*length(subsample_grid)*length(gamma_grid)*param2 + length(threshold_grid)*K*length(subsample_grid)*length(gamma_grid)*length(max_depth_grid)*param1]))
+            CVF1_xGB[[seed]] <- c(CVF1_xGB[[seed]], mean(F1_xGB[[seed]][param5 + (0:(K-1)) * length(threshold_grid) + length(threshold_grid)*K*param4 + length(threshold_grid)*K*length(subsample_grid)*param3 + length(threshold_grid)*K*length(subsample_grid)*length(gamma_grid)*param2 + length(threshold_grid)*K*length(subsample_grid)*length(gamma_grid)*length(max_depth_grid)*param1]))
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+
+# Accuracy
+
+```{r}
+xGB_Accuracy <- as.data.frame(CVAccuracy_xGB)
+colnames(xGB_Accuracy) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+xGB_Accuracy <- as.data.frame(t(as.matrix(xGB_Accuracy)))
+
+xGB_Accuracy <- xGB_Accuracy%>%
+  gather(key = "Parameter", value = "Accuracy")%>%
+  mutate(threshold = threshold_grid[((row_number()-1)%/%K)%%length((threshold_grid)) + 1])%>%
+  mutate(subsample = subsample_grid[((row_number()-1)%/%(K*length(threshold_grid)))%%length(subsample_grid) + 1])%>%
+  mutate(gamma = gamma_grid[((row_number()-1)%/%(K*length(threshold_grid)*length(subsample_grid)))%%length(gamma_grid) + 1])%>%
+  mutate(max_depth = max_depth_grid[((row_number()-1)%/%(K*length(threshold_grid)*length(subsample_grid)*length(gamma_grid)))%%length(max_depth_grid) + 1])%>%
+  mutate(eta = eta_grid[((row_number()-1)%/%(K*length(threshold_grid)*length(subsample_grid)*length(gamma_grid)*length(max_depth_grid)))%%length(eta_grid) + 1])
+```
+
+## Plot
+
+### eta
+
+```{r}
+xGB_Accuracy %>%
+  ggplot()+
+  geom_boxplot(aes(x = eta, y = Accuracy, group = eta))
+```
+
+### max_depth
+
+```{r}
+xGB_Accuracy %>%
+  ggplot()+
+  geom_boxplot(aes(x = max_depth, y = Accuracy, group = max_depth))
+```
+
+### gamma
+
+```{r}
+xGB_Accuracy %>%
+  ggplot()+
+  geom_boxplot(aes(x = gamma, y = Accuracy, group = gamma))
+```
+
+### subsample
+
+```{r}
+xGB_Accuracy %>%
+  ggplot()+
+  geom_boxplot(aes(x = subsample, y = Accuracy, group = subsample))
+```
+
+## Arrange
+
+```{r}
+xGB_Accuracy %>%
+  group_by(Parameter)%>%
+  summarise(Accuracy = mean(Accuracy))%>%
+  arrange(desc(Accuracy)) %>%
+  head(20)
+```
+
+## Best 5 Comparison
+
+```{r}
+xGB_Accuracy_Best5 <- xGB_Accuracy %>%
+  filter(Parameter %in% c("V1397", "V851", "V1356", "V1355", "V1398")) 
+
+xGB_Accuracy_Best5_Mean <- xGB_Accuracy_Best5 %>%
+  group_by(Parameter)%>%
+  summarise(Accuracy_mean = mean(Accuracy))
+
+ggplot()+
+  geom_boxplot(data = xGB_Accuracy_Best5, aes(x = Accuracy, y = Parameter, group = Parameter))+
+  geom_point(data = xGB_Accuracy_Best5_Mean, aes(x = Accuracy_mean, y = Parameter), color = "red")
+```
+
+```{r}
+xGB_Accuracy %>%
+  filter(Parameter %in% c("V1397"))
+```
+
+
+# F1
+
+```{r}
+xGB_F1 <- as.data.frame(CVF1_xGB)
+colnames(xGB_F1) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+xGB_F1 <- as.data.frame(t(as.matrix(xGB_F1)))
+
+xGB_F1 <- xGB_F1%>%
+  gather(key = "Parameter", value = "F1")%>%
+  mutate(threshold = threshold_grid[((row_number()-1)%/%K)%%length((threshold_grid)) + 1])%>%
+  mutate(subsample = subsample_grid[((row_number()-1)%/%(K*length(threshold_grid)))%%length(subsample_grid) + 1])%>%
+  mutate(gamma = gamma_grid[((row_number()-1)%/%(K*length(threshold_grid)*length(subsample_grid)))%%length(gamma_grid) + 1])%>%
+  mutate(max_depth = max_depth_grid[((row_number()-1)%/%(K*length(threshold_grid)*length(subsample_grid)*length(gamma_grid)))%%length(max_depth_grid) + 1])%>%
+  mutate(eta = eta_grid[((row_number()-1)%/%(K*length(threshold_grid)*length(subsample_grid)*length(gamma_grid)*length(max_depth_grid)))%%length(eta_grid) + 1])
+```
+
+## Plot
+
+### eta
+
+```{r}
+xGB_F1 %>%
+  ggplot()+
+  geom_boxplot(aes(x = eta, y = F1, group = eta))
+```
+
+### max_depth
+
+```{r}
+xGB_F1 %>%
+  ggplot()+
+  geom_boxplot(aes(x = max_depth, y = F1, group = max_depth))
+```
+
+### gamma
+
+```{r}
+xGB_F1 %>%
+  ggplot()+
+  geom_boxplot(aes(x = gamma, y = F1, group = gamma))
+```
+
+### subsample
+
+```{r}
+xGB_F1 %>%
+  ggplot()+
+  geom_boxplot(aes(x = subsample, y = F1, group = subsample))
+```
+
+## Arrange
+
+```{r}
+xGB_F1 %>%
+  arrange(desc(F1)) %>%
+  head(20)
+```
+
+## Best 5 Comparison
+
+```{r}
+xGB_F1_Best5 <- xGB_F1 %>%
+  filter(Parameter %in% c("V366", "V1789", "V1518", "V1790", "V10")) 
+
+xGB_F1_Best5_Mean <- xGB_F1_Best5 %>%
+  group_by(Parameter)%>%
+  summarise(F1_mean = mean(F1))
+
+ggplot()+
+  geom_boxplot(data = xGB_F1_Best5, aes(x = F1, y = Parameter, group = Parameter))+
+  geom_point(data = xGB_F1_Best5_Mean, aes(x = F1_mean, y = Parameter), color = "red")
+```
+
+```{r}
+xGB_F1 %>%
+  filter(Parameter %in% c("V1518"))
+```
+
+# Conclusion
+
+Accuracy : Threshold 0.5, subsample 0.5, gamma 0, max_depth 10, eta 0.1
+
+- Seed 1 : 71.393%
+
+- Seed 1~10 : mean 0.70010, sd 0.0079153, median 0.70045
+
+F score : Threshold 0.4, subsample 0.5, gamma 0, max_depth 4, eta 0.2
+
+- Seed 1 : 0.72089
+
+- Seed 1~10 : mean 0.72110, sd 0.0092200, median 0.72186
+
+
+
+
+
+
+
+
+
+

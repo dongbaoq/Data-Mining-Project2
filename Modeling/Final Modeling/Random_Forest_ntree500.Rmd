@@ -1,0 +1,201 @@
+---
+title: "Random_Forest_Train_dataset"
+author: "DonghyunPark"
+date: "2023-05-27"
+output: html_document
+---
+
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(showtext)
+library(GGally)
+library(lubridate)
+library(corrplot)
+library(glmnet)
+library(randomForest)
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Load Dataset
+
+```{r}
+data <- read.csv("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Dataset/train_set.csv", fileEncoding = "euc-kr")
+
+data$target <- as.factor(data$target)
+```
+
+# Checking Dataset
+
+```{r}
+data %>%
+  na.omit() %>%
+  dim()
+```
+
+Equal to original data : 결측치가 없음
+
+```{r}
+data %>%
+  str()
+```
+
+# Random Forest
+
+```{r, warning= FALSE}
+n = nrow(data)
+K = 10 # 10-fold CV
+
+# 설정하려는 Seed 총 개수
+Seed_Num = 10
+  
+# Seed, parameter 별로 일단 모두 저장
+Accuracy_RFB <- vector(mode = "list", length = Seed_Num)
+FPR_RFB <- vector(mode = "list", length = Seed_Num)
+FNR_RFB <- vector(mode = "list", length = Seed_Num)
+F1_RFB <- vector(mode = "list", length = Seed_Num)
+
+# Parameter grid 설정
+mtry_grid <- c(1, 3, 5, 7, 10, 15)
+
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  print("seed")
+  print(seed)
+  set.seed(seed)
+  
+  # Parameter 별로 For loop
+  for(mtry in mtry_grid){
+    print("mtry")
+    print(mtry)
+    
+      for(CV in 1:K){
+        ########################################################################################
+        # CV generation. Train : Test를 9:1로 나눔 (이때의 train, test는 validation approach)  #
+        ########################################################################################
+        CV_index <- split(sample(1:n), rep(1:K, length.out = n))
+        train <- data[-CV_index[[CV]], ] # Train set
+        train_index <- c(1:n) 
+        train_index <- train_index[-CV_index[[CV]]] # Train set의 index (필요할 경우 사용)
+        test <- data[CV_index[[CV]], ] # Test set
+        test_rowNum <- nrow(test) # Test set row Numbers (필요할 경우 사용))
+        
+        #################################################################
+        # Modeling and Prediction. Update Accuracy, FNR, FPR, F1 score  #
+        #################################################################
+        # Train index가 필요한 경우
+        Model <- randomForest(target ~ ., data = data, subset = train_index, mtry = mtry, method = "class")
+        
+        
+        # Prediction (0, 1로 나오는 경우)
+        pred <- predict(Model, newdata = test)
+        
+        # Update Scores
+        Accuracy_RFB[[seed]] <- c(Accuracy_RFB[[seed]], mean(pred == test$target))
+        FPR_RFB[[seed]] <- c(FPR_RFB[[seed]], mean((pred != test$target) & (test$target == 0)) / mean(test$target == 0))
+        FNR_RFB[[seed]] <- c(FNR_RFB[[seed]], mean((pred != test$target) & (test$target == 1)) / mean(test$target == 1))
+        F1_RFB[[seed]] <- c(F1_RFB[[seed]], 2*(mean((pred==test$target)&(test$target==1))/(mean(pred==1))*mean((pred==test$target)&(test$target==1))/(mean(test$target==1))) / (mean((pred==test$target)&(test$target==1))/(mean(pred==1))+mean((pred==test$target)&(test$target==1))/(mean(test$target==1))))
+      }
+      
+    
+  }
+}
+```
+
+## CV meaning process
+
+```{r}
+# Seed, parameter 별로 CV에 대해 평균내어 모두 저장
+CVAccuracy_RFB <- vector(mode = "list", length = Seed_Num)
+CVFPR_RFB <- vector(mode = "list", length = Seed_Num)
+CVFNR_RFB <- vector(mode = "list", length = Seed_Num)
+CVF1_RFB <- vector(mode = "list", length = Seed_Num)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  # Parameter 별로 For loop
+  for(param1 in 1:length(mtry_grid)){
+      CVAccuracy_RFB[[seed]] <- c(CVAccuracy_RFB[[seed]], mean(Accuracy_RFB[[seed]][1:K + K * (param1 - 1)]))
+      CVFPR_RFB[[seed]] <- c(CVFPR_RFB[[seed]], mean(FPR_RFB[[seed]][1:K + K * (param1 - 1)]))
+      CVFNR_RFB[[seed]] <- c(CVFNR_RFB[[seed]], mean(FNR_RFB[[seed]][1:K + K * (param1 - 1)]))
+      CVF1_RFB[[seed]] <- c(CVF1_RFB[[seed]], mean(F1_RFB[[seed]][1:K + K * (param1 - 1)]))
+  }
+}
+```
+
+## Accuracy
+
+```{r}
+RFB_Accuracy <- as.data.frame(CVAccuracy_RFB)
+colnames(RFB_Accuracy) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+RFB_Accuracy <- as.data.frame(t(as.matrix(RFB_Accuracy)))
+
+RFB_Accuracy
+```
+
+```{r}
+RFB_Accuracy %>%
+  gather("V1","V2","V3","V4","V5","V6", key = "mtry", value = "Accuracy")%>%
+  ggplot()+
+  geom_boxplot(aes(x = Accuracy, color = mtry))+
+  ylab("Mtries")+
+  theme_bw()+
+  ggtitle("Random Forest ntree 500", subtitle = "Accuracy")
+```
+
+```{r}
+RFB_Accuracy%>%
+  gather("V1","V2","V3","V4","V5","V6", key = "mtry", value = "Accuracy")%>%
+  filter(mtry == "V3" | mtry == "V4" | mtry == "V6")%>%
+  ggplot()+
+  geom_density(aes(x = Accuracy, y = ..scaled.., color = mtry), stat = "density")+
+  theme_bw()+
+  ggtitle("Random Forest ntree 500", subtitle = "Accuracy")
+```
+
+
+## F1 score
+
+```{r}
+RFB_F1 <- as.data.frame(CVF1_RFB)
+colnames(RFB_F1) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+RFB_F1 <- as.data.frame(t(as.matrix(RFB_F1)))
+
+RFB_F1
+```
+
+```{r}
+RFB_F1 %>%
+  gather("V1","V2","V3","V4","V5","V6", key = "mtry", value = "Accuracy")%>%
+  ggplot()+
+  geom_boxplot(aes(x = Accuracy, color = mtry))+
+  ylab("Mtries")+
+  theme_bw()+
+  ggtitle("Random Forest ntree 500", subtitle = "F1 score")
+```
+
+
+# Conclusion
+
+Accuracy : mtry = 15
+
+Seed 1 : 
+
+- Accuracy 71.094%
+
+Seed from 1~10 : 
+
+- Accuracy average 0.71064, standard deviation 0.0074981, median 0.71244
+
+F1 score : mtry = 7
+
+Seed 1 :
+
+- F1 score 0.7079608
+
+Seed from 1~10 :
+
+- F1 score average 0.70365, standard deviation 0.0080211, median 0.70466
+
+
