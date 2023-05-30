@@ -1,0 +1,195 @@
+---
+title: "LDA"
+author: "DonghyunPark"
+date: "2023-05-30"
+output: html_document
+---
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(showtext)
+library(MASS)
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Load Dataset
+
+```{r}
+data <- read.csv("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Dataset/train_set_encoded.csv", fileEncoding = "euc-kr")
+```
+
+## Pre processing
+
+```{r}
+data <- data[, 1:45]
+data$target <- as.factor(data$target)
+```
+
+```{r}
+# 표준화 함수
+normalizer <- function(x) {
+  return((x-mean(x))/sd(x))
+}
+```
+
+```{r}
+for(i in 1:45){
+  if(i == 4) next
+  data[,i] = normalizer(data[,i])
+}
+```
+
+# LDA
+
+```{r, warning = FALSE}
+n = nrow(data)
+K = 10 # 10-fold CV
+
+# 설정하려는 Seed 총 개수
+Seed_Num = 10
+  
+# Seed, parameter 별로 일단 모두 저장
+Accuracy_LDA <- vector(mode = "list", length = Seed_Num)
+FPR_LDA <- vector(mode = "list", length = Seed_Num)
+FNR_LDA <- vector(mode = "list", length = Seed_Num)
+F1_LDA <- vector(mode = "list", length = Seed_Num)
+
+# Parameter grid 설정
+threshold_grid <- seq(from = 0, to = 1, length.out = 51)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  print("seed")
+  print(seed)
+  set.seed(seed)
+  
+  for(CV in 1:K){
+  ########################################################################################
+  # CV generation. Train : Test를 9:1로 나눔 (이때의 train, test는 validation approach)  #
+  ########################################################################################
+        
+    CV_index <- split(sample(1:n), rep(1:K, length.out = n))
+    train <- data[-CV_index[[CV]], ] # Train set
+    train_index <- c(1:n) 
+    train_index <- train_index[-CV_index[[CV]]] # Train set의 index (필요할 경우 사용)
+    test <- data[CV_index[[CV]], ] # Test set
+    test_rowNum <- nrow(test) # Test set row Numbers (필요할 경우 사용))
+        
+    #################################################################
+    # Modeling and Prediction. Update Accuracy, FNR, FPR, F1 score  #
+    #################################################################
+    # Prior은 비율로 정의됨.
+    Model <- lda(target ~ ., data = data, subset = train_index)
+        
+    for(threshold in threshold_grid){
+      prob_pred <- predict(Model, newdata = test, type = "response")
+      prob_pred <- prob_pred$posterior[,2]
+      pred <- rep(0, test_rowNum)
+      pred[prob_pred > threshold] <- 1
+        
+      # Update Scores
+      Accuracy_LDA[[seed]] <- c(Accuracy_LDA[[seed]], mean(pred == test$target))
+      FPR_LDA[[seed]] <- c(FPR_LDA[[seed]], mean((pred != test$target) & (test$target == 0)) / mean(test$target == 0))
+      FNR_LDA[[seed]] <- c(FNR_LDA[[seed]], mean((pred != test$target) & (test$target == 1)) / mean(test$target == 1))
+      F1_LDA[[seed]] <- c(F1_LDA[[seed]], 2*(mean((pred==test$target)&(test$target==1))/(mean(pred==1))*mean((pred==test$target)&(test$target==1))/(mean(test$target==1))) / (mean((pred==test$target)&(test$target==1))/(mean(pred==1))+mean((pred==test$target)&(test$target==1))/(mean(test$target==1))))  
+    }
+  }
+}
+```
+
+```{r}
+# Seed, parameter 별로 CV에 대해 평균내어 모두 저장
+CVAccuracy_LDA <- vector(mode = "list", length = Seed_Num)
+CVFPR_LDA <- vector(mode = "list", length = Seed_Num)
+CVFNR_LDA <- vector(mode = "list", length = Seed_Num)
+CVF1_LDA <- vector(mode = "list", length = Seed_Num)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  # Parameter 별로 For loop
+  for(param1 in 1:length(threshold_grid)){
+    CVAccuracy_LDA[[seed]] <- c(CVAccuracy_LDA[[seed]], mean(Accuracy_LDA[[seed]][param1 + length(threshold_grid) * (0:(K-1))]))
+    CVFPR_LDA[[seed]] <- c(CVFPR_LDA[[seed]], mean(FPR_LDA[[seed]][param1 + length(threshold_grid) * (0:(K-1))]))
+    CVFNR_LDA[[seed]] <- c(CVFNR_LDA[[seed]], mean(FNR_LDA[[seed]][param1 + length(threshold_grid) * (0:(K-1))]))
+    CVF1_LDA[[seed]] <- c(CVF1_LDA[[seed]], mean(F1_LDA[[seed]][param1 + length(threshold_grid) * (0:(K-1))]))
+  }
+}
+```
+
+# Accuracy
+
+```{r}
+LDA_Accuracy <- as.data.frame(CVAccuracy_LDA)
+colnames(LDA_Accuracy) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+LDA_Accuracy <- as.data.frame(t(as.matrix(LDA_Accuracy)))
+
+LDA_Accuracy <- LDA_Accuracy%>%
+  gather(key = "threshold", value = "Accuracy")
+
+LDA_Accuracy_mean <- LDA_Accuracy%>%
+  group_by(threshold)%>%
+  summarise(Accuracy_mean = mean(Accuracy)) 
+
+LDA_Accuracy_mean%>%
+  arrange(desc(Accuracy_mean))%>%
+  head(10)
+```
+
+```{r}
+LDA_Accuracy
+```
+
+
+```{r}
+ggplot()+
+  geom_boxplot(data = LDA_Accuracy%>%
+  filter(threshold %in% c("V21","V22","V23","V24","V25","V26","V27","V29","V30","V31")), aes(x = Accuracy, y = threshold, color = threshold))+
+  geom_point(data = LDA_Accuracy_mean%>%
+               filter(threshold %in% c("V21","V22","V23","V24","V25","V26","V27","V29","V30","V31")), aes(x = Accuracy_mean, y = threshold))
+```
+
+# F score
+
+```{r}
+LDA_F1 <- as.data.frame(CVF1_LDA)
+colnames(LDA_F1) <- c("CV1", "CV2", "CV3", "CV4", "CV5", "CV6", "CV7", "CV8", "CV9", "CV10")
+LDA_F1 <- as.data.frame(t(as.matrix(LDA_F1)))
+
+LDA_F1 <- LDA_F1%>%
+  gather(key = "threshold", value = "F1")
+
+LDA_F1_mean <- LDA_F1%>%
+  group_by(threshold)%>%
+  summarise(F1_mean = mean(F1)) 
+
+LDA_F1_mean%>%
+  arrange(desc(F1_mean))%>%
+  head(10)
+```
+
+```{r}
+LDA_F1
+```
+
+```{r}
+ggplot()+
+  geom_boxplot(data = LDA_F1%>%
+  filter(threshold %in% c("V13","V14","V15","V16","V17","V18","V19","V20","V21","V22")), aes(x = F1, y = threshold, color = threshold))+
+  geom_point(data = LDA_F1_mean%>%
+               filter(threshold %in% c("V13","V14","V15","V16","V17","V18","V19","V20","V21","V22")), aes(x = F1_mean, y = threshold))
+```
+
+# Conclusion
+
+Accuracy : Threshold 0.46
+
+- Seed 1 : 70.063%
+
+- Seed 1~10 : mean 0.70294, sd 0.0078102, median 0.70128
+
+F score : Threshold 0.3
+
+- Seed 1 : 72.293
+
+- Seed 1~10 : mean 0.72476, sd 0.00900, median 0.72443
+
