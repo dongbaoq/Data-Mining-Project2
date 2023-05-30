@@ -1,0 +1,134 @@
+---
+title: "Modeling"
+author: "DonghyunPark"
+date: "2023-05-27"
+output: html_document
+---
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(showtext)
+library(GGally)
+library(lubridate)
+library(corrplot)
+library(glmnet)
+library(randomForest)
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Load Dataset
+
+```{r}
+data <- read.csv("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Dataset/train_set.csv", fileEncoding = "euc-kr")
+```
+
+# Checking Dataset
+
+```{r}
+data %>%
+  na.omit() %>%
+  dim()
+```
+
+# Modeling PseudoCode
+
+```{r}
+# Data load
+data <- read.csv(train.csv)
+n = nrow(data)
+K = 10 # 10-fold CV
+
+# 설정하려는 Seed 총 개수
+Seed_Num = 10
+  
+# Seed, parameter 별로 일단 모두 저장
+Accuracy_Model <- vector(mode = "list", length = Seed_Num)
+FPR_Model <- vector(mode = "list", length = Seed_Num)
+FNR_Model <- vector(mode = "list", length = Seed_Num)
+F1_Model <- vector(mode = "list", length = Seed_Num)
+
+# Parameter grid 설정
+param1_grid <- c()
+param2_grid <- c()
+
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  print("seed")
+  print(seed)
+  set.seed(seed)
+  # Parameter 별로 For loop
+  for(param1 in param1_grid){
+    for(param2 in param2_grid){
+      
+      print("param1")
+      print(param1)
+      print("param2")
+      print(param2)
+      
+      for(CV in 1:K){
+        ########################################################################################
+        # CV generation. Train : Test를 9:1로 나눔 (이때의 train, test는 validation approach)  #
+        ########################################################################################
+        CV_index <- split(sample(1:n), rep(1:K, length.out = n))
+        train <- data[-CV_index[[CV]], ] # Train set
+        train_index <- c(1:n) 
+        train_index <- train_index[-CV_index[[CV]]] # Train set의 index (필요할 경우 사용)
+        test <- data[CV_index[[CV]], ] # Test set
+        test_rowNum <- nrow(test) # Test set row Numbers (필요할 경우 사용))
+        
+        #################################################################
+        # Modeling and Prediction. Update Accuracy, FNR, FPR, F1 score  #
+        #################################################################
+        # Train index가 필요한 경우
+        Model <- Model(target ~ ., data = data, subset = train_index, p1 = param1, p2 = param2)
+        # Train 데이터셋이 필요한 경우
+        Model <- Model(target ~ ., data = train, p1 = param1, p2 = param2)
+        
+        
+        # Prediction (0, 1로 나오는 경우)
+        pred <- predict(Model, newdata = test)
+        
+        # Prediction이 확률로 나오는 경우
+        prob_pred <- predict(Model, newdata = test)
+        pred <- rep(0, test_rowNum)
+        pred[prob_pred > threshold] <- 1 # threshold에는 Threshold grid 있을 시에는 param을, 아니면 숫자로 넣어줌.
+        
+        # Update Scores
+        Accuracy_Model[[seed]] <- c(Accuracy_Model[[seed]], mean(pred == test$target))
+        FPR_Model[[seed]] <- c(FPR_Model[[seed]], mean((pred != test$target) & (test$target == 0)) / mean(test$target == 0))
+        FNR_Model[[seed]] <- c(FNR_Model[[seed]], mean((pred != test$target) & (test$target == 1)) / mean(test$target == 1))
+        F1_Model[[seed]] <- c(F1_Model[[seed]], 2*(mean((pred==test$target)&(test$target==1))/(mean(pred==1))*mean((pred==test$target)&(test$target==1))/(mean(test$target==1))) / (mean((pred==test$target)&(test$target==1))/(mean(pred==1))+mean((pred==test$target)&(test$target==1))/(mean(test$target==1))))
+      }
+      
+    }
+  }
+}
+```
+
+```{r}
+# Seed, parameter 별로 CV에 대해 평균내어 모두 저장
+CVAccuracy_Model <- vector(mode = "list", length = Seed_Num)
+CVFPR_Model <- vector(mode = "list", length = Seed_Num)
+CVFNR_Model <- vector(mode = "list", length = Seed_Num)
+CVF1_Model <- vector(mode = "list", length = Seed_Num)
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  # Parameter 별로 For loop
+  for(param1 in 1:length(param1_grid)){
+    for(param2 in 1:length(param2_grid)){
+      CVAccuracy_Model[[seed]] <- c(CVAccuracy_Model[[seed]], mean(Accuracy_Model[[seed]][1:K + K * (param2 - 1) + K * length(param2_grid) * (param1 - 1)]))
+      CVFPR_Model[[seed]] <- c(CVFPR_Model[[seed]], mean(FPR_Model[[seed]][1:K + K * (param2 - 1) + K * length(param2_grid) * (param1 - 1)]))
+      CVFNR_Model[[seed]] <- c(CVFNR_Model[[seed]], mean(FNR_Model[[seed]][1:K + K * (param2 - 1) + K * length(param2_grid) * (param1 - 1)]))
+      CVF1_Model[[seed]] <- c(CVF1_Model[[seed]], mean(F1_Model[[seed]][1:K + K * (param2 - 1) + K * length(param2_grid) * (param1 - 1)]))
+    }
+  }
+}
+```
+
+
+
+
+
+
