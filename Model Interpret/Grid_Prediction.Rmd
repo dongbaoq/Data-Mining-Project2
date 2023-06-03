@@ -1,0 +1,177 @@
+---
+title: "RandomForest_gridSearch"
+author: "DonghyunPark"
+date: "2023-05-31"
+output: html_document
+---
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(randomForest)
+library(showtext)
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Load Dataset
+
+```{r}
+# Data Load
+data <- read.csv("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Data-Mining-Project2/Dataset/train_set_encoded.csv", fileEncoding = "euc-kr")
+
+data$target <- as.factor(data$target)
+```
+
+# Train Model
+
+```{r}
+set.seed(1)
+
+# Model Fitting
+Model <- randomForest(target ~ ., data = data, ntree = 1500, mtry = 5, method = "class")
+```
+
+# Make a grid
+
+```{r}
+# If random = 1, se generate grid with equal cuts. If random = 0, random numbers are generated. Generation is bounded with data[,col]'s [-2.5IQR + median, 2.5IQR + median] The reason is to look at large scale.
+Make_grid <- function(col, length, random = 0){
+  if(random == 1){
+    return(seq(from = median(data[,col])-2.5*IQR(data[,col]), to = median(data[,col])+2.5*IQR(data[,col]), length.out = length))
+  }else{
+    return(runif(min = (median(data[,col])-2.5*IQR(data[,col])), max = (median(data[,col])+2.5*IQR(data[,col])), n = length))
+  }
+}
+```
+
+## Index for importance variable
+
+```{r}
+# Interested columns (From Importance Plot) column number
+IV_index <- c(38,37,41,42,36,2,40,1,44,43,45,3)
+```
+
+## Importance variable : grid length 10
+
+```{r}
+# From our visualization bottleneck, we consider only two columns
+in_col1 <- IV_index[3]
+in_col2 <- IV_index[6]
+```
+
+```{r}
+# Grid resolution is resolution of our column's grid. Samples MC is how much samples we will mean at Monte Carlo. We wanted to resample Monte Carlo but failed due to the limit of our computing source problem.
+grid_resolution <- 100
+samples_MC <- 10000
+resampling_MC <- 1
+
+# Store Average Prediction
+Prediction <- vector("list", length = grid_resolution*grid_resolution)
+
+# Generate column grid for interested columns (range from [-2.5IQR + median, 2.5IQR + median])
+col1_grid <- Make_grid(in_col1, grid_resolution, random = 1)
+col2_grid <- Make_grid(in_col2, grid_resolution, random = 1)
+
+# We store median and IQR for doing less computation on main loop
+data_col_med <- c()
+data_col_IQR <- c()
+
+for(col in 1:56){
+  if(col == 4) {
+    data_col_med <- c(data_col_med, NA)
+    data_col_IQR <- c(data_col_IQR, NA)
+    next
+  }
+  data_col_med <- c(data_col_med, median(data[,col]))
+  data_col_IQR <- c(data_col_IQR, IQR(data[,col]))
+}
+```
+
+```{r}
+for(iter in 1:resampling_MC){
+  print("iter")
+  print(iter)
+      # Pre generate sample. R cbind option is very slow. Instead, we fix dataframe and keep update columns. This will save time since each for loop could predict what memory to access.
+      sample <- as.data.frame(matrix(NA, nrow = samples_MC, ncol = 56))
+      colnames(sample) <- colnames(data)
+      
+      for(col in 1:56){
+        if(col == in_col1 | col == in_col2 | col == 4){
+          
+        }
+        else if(col < 46){
+          # Fill in random numbers from [-1.5IQR + median, 1.5IQR + median] we assumed these columns are centered at this range.
+          sample[,col] <- runif(min = data_col_med[col] - 1.5*data_col_IQR[col], max = data_col_med[col] + 1.5*data_col_IQR[col], n = samples_MC)
+        }else{
+          sample[,col] <- sample(c(0,1), replace = TRUE, size = samples_MC)
+        }
+      }
+      
+      for(grid1 in 1:grid_resolution){
+        if((grid1-1) %% 10 == 0){
+          print("grid1")
+          print(grid1)
+        }
+  
+        for(grid2 in 1:grid_resolution){
+          if((grid1-1) %% 10 == 0 & (grid2-1) %% 10 == 0){
+            print("grid2")
+            print(grid2)
+          }
+          # Set interested columns' value
+          sample[,in_col1] <- rep(col1_grid[grid1], samples_MC)
+          sample[,in_col2] <- rep(col2_grid[grid2], samples_MC)
+          
+          # Update Prediction list.  
+          Prediction[[grid2 + (grid1 - 1) * grid_resolution]] <- c(Prediction[[grid2 + (grid1 - 1) * grid_resolution]], sum(predict(Model, sample) == "1")/samples_MC)
+        }
+      
+      }
+}
+```
+
+# Prediction Dataframe Generation
+
+```{r}
+# Generates Dataframe which 'index' means if index = -1, we average from resampling Monte Carlo. Other index will generate dataframe from resampling Monte Carlo i th time. This dataframe contains interested column's grid and average prediction.
+Pred_Df_Gen <- function(index = -1){
+  pred <- c()
+  if(index == -1){
+    for(i in 1:(grid_resolution * grid_resolution)) pred <- c(pred, mean(Prediction[[i]]))
+  }else{
+    for(i in 1:(grid_resolution * grid_resolution)) pred <- c(pred, Prediction[[i]][index])
+  }
+  return(as.data.frame(pred)%>%
+    mutate(col1 = col1_grid[(row_number()-1)%/%grid_resolution + 1])%>%
+    mutate(col2 = col2_grid[(row_number()-1)%%grid_resolution + 1]))
+}
+```
+
+# Monte carlo result (Average)
+
+```{r}
+Prediction_df <- Pred_Df_Gen(index = -1)
+
+
+# Plot generation. Dotted line means 1.5 IQR over or median.
+p <- ggplot(data = Prediction_df)+
+  geom_point(aes(x = col1, y = col2, color = pred))+
+  geom_vline(aes(x = col1, y = col2), xintercept = data_col_med[in_col1], linetype = "dotted", alpha = 0.6)+
+  geom_vline(aes(x = col1, y = col2), xintercept = data_col_med[in_col1] + 1.5 * data_col_IQR[in_col1], linetype = "dotted", alpha = 0.4)+
+  geom_vline(aes(x = col1, y = col2), xintercept = data_col_med[in_col1] - 1.5 * data_col_IQR[in_col1], linetype = "dotted", alpha = 0.4)+
+  geom_hline(aes(x = col1, y = col2), yintercept = data_col_med[in_col2], linetype = "dotted", alpha = 0.6)+
+  geom_hline(aes(x = col1, y = col2), yintercept = data_col_med[in_col2] + 1.5 * data_col_IQR[in_col2], linetype = "dotted", alpha = 0.4)+
+  geom_hline(aes(x = col1, y = col2), yintercept = data_col_med[in_col2] - 1.5 * data_col_IQR[in_col2], linetype = "dotted", alpha = 0.4)+
+  theme(panel.background = element_blank(), axis.line = element_line(colour = "black"), plot.title = element_text(size = 12, face = "bold", hjust = 0.5), plot.subtitle = element_text(size = 10, hjust = 0.5), text = element_text(size = 10))+
+  scale_color_continuous(type = "viridis")+
+  xlab("Col 1(영업이익률)")+                         
+  ylab("Col 2(EPS)")+                       
+  ggtitle("Marginal Column Effect", subtitle = "Monte Carlo on Marginal Grid, 10000 samples")
+
+
+ggsave("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Data-Mining-Project2/Model Interpret/Marginal Column Effect (Average) 영업이익률 vs EPS.png", height = 5, width = 5, plot = p, dpi = 300)
+
+p
+```
+
