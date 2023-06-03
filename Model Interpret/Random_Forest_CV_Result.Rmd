@@ -1,0 +1,122 @@
+---
+title: "Random Forest Prediction Values"
+author: "DonghyunPark"
+date: "2023-06-03"
+output: html_document
+---
+
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(showtext)
+library(GGally)
+library(lubridate)
+library(corrplot)
+library(glmnet)
+library(randomForest)
+
+font_add_google("Nanum Gothic", "nanum")
+showtext_auto()
+```
+
+# Load Dataset
+
+```{r}
+data <- read.csv("/Users/donghyunpark/Documents/Seoul National University/3rd year 1st semester/Data mining/2차 프로젝트/Data-Mining-Project2/Dataset/train_set.csv", fileEncoding = "euc-kr")
+
+data$target <- as.factor(data$target)
+```
+
+# Checking Dataset
+
+```{r}
+data %>%
+  na.omit() %>%
+  dim()
+```
+
+Equal to original data : 결측치가 없음
+
+```{r}
+data %>%
+  str()
+```
+
+# Random Forest
+
+```{r, warning= FALSE}
+n = nrow(data)
+K = 10 # 10-fold CV
+
+# 설정하려는 Seed 총 개수
+Seed_Num = 10
+  
+# Seed, parameter 별로 일단 모두 저장
+Accuracy_RF <- vector(mode = "list", length = Seed_Num)
+FPR_RF <- vector(mode = "list", length = Seed_Num)
+FNR_RF <- vector(mode = "list", length = Seed_Num)
+F1_RF <- vector(mode = "list", length = Seed_Num)
+
+# Parameter grid 설정
+mtry <- 5
+
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+  print("seed")
+  print(seed)
+  set.seed(seed)
+  
+      for(CV in 1:K){
+        ########################################################################################
+        # CV generation. Train : Test를 9:1로 나눔 (이때의 train, test는 validation approach)  #
+        ########################################################################################
+        CV_index <- split(sample(1:n), rep(1:K, length.out = n))
+        train <- data[-CV_index[[CV]], ] # Train set
+        train_index <- c(1:n) 
+        train_index <- train_index[-CV_index[[CV]]] # Train set의 index (필요할 경우 사용)
+        test <- data[CV_index[[CV]], ] # Test set
+        test_rowNum <- nrow(test) # Test set row Numbers (필요할 경우 사용))
+        
+        #################################################################
+        # Modeling and Prediction. Update Accuracy, FNR, FPR, F1 score  #
+        #################################################################
+        # Train index가 필요한 경우
+        Model <- randomForest(target ~ ., data = data, subset = train_index, ntree = 1500, mtry = mtry, method = "class")
+        
+        
+        # Prediction (0, 1로 나오는 경우)
+        pred <- predict(Model, newdata = test)
+        
+        # Update Scores
+        Accuracy_RF[[seed]] <- c(Accuracy_RF[[seed]], mean(pred == test$target))
+        FPR_RF[[seed]] <- c(FPR_RF[[seed]], mean((pred != test$target) & (test$target == 0)) / mean(test$target == 0))
+        FNR_RF[[seed]] <- c(FNR_RF[[seed]], mean((pred != test$target) & (test$target == 1)) / mean(test$target == 1))
+        F1_RF[[seed]] <- c(F1_RF[[seed]], 2*(mean((pred==test$target)&(test$target==1))/(mean(pred==1))*mean((pred==test$target)&(test$target==1))/(mean(test$target==1))) / (mean((pred==test$target)&(test$target==1))/(mean(pred==1))+mean((pred==test$target)&(test$target==1))/(mean(test$target==1))))
+      }
+  
+}
+```
+
+## CV meaning process
+
+```{r}
+# Seed, parameter 별로 CV에 대해 평균내어 모두 저장
+CVAccuracy_RF <- c()
+CVFPR_RF <- c()
+CVFNR_RF <- c()
+CVF1_RF <- c()
+
+for(seed in 1:Seed_Num){  # Seed를 다르게 하는 For loop
+      CVAccuracy_RF <- c(CVAccuracy_RF, mean(Accuracy_RF[[seed]]))
+      CVFPR_RF <- c(CVFPR_RF, mean(FPR_RF[[seed]]))
+      CVFNR_RF <- c(CVFNR_RF, mean(FNR_RF[[seed]]))
+      CVF1_RF <- c(CVF1_RF, mean(F1_RF[[seed]]))
+}
+```
+
+## Accuracy, FPR, FNR, F1 score Dataframe
+
+```{r}
+as.data.frame(cbind(CVAccuracy_RF, CVFPR_RF, CVFNR_RF, CVF1_RF))
+```
+
