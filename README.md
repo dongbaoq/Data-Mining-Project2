@@ -4,7 +4,9 @@
 
 In this repository, I uploaded my team-project on the Seoul National University(SNU) Statistic department Data-mining course team project result. Our team project's goal was to apply the statistical methods in classification problem, and our topic is
 
-<center>**Analysis of Quarterly Stock Price Changes in KOSPI 200 Companies Using Financial Indicators and Social Variables**</center>
+<p align="center">
+  <strong>Analysis of Quarterly Stock Price Changes in KOSPI 200 Companies Using Financial Indicators and Social Variable</strong>
+</p>
 
 ## Proposal
 
