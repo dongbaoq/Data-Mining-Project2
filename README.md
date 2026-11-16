@@ -2,11 +2,9 @@
 
 ## Introduction
 
-In this repository, I will upload my works and our teams' result in different tags.
+In this repository, I uploaded my team-project on the Seoul National University(SNU) Statistic department Data-mining course team project result. Our team project's topic was to apply the statistical methods in classification problem.
 
-Shortly saying we have done project with theme : How can we predict 2 week later's stock?
-
-## Theme
+## Proposal
 
 We have explored on Korea's company which belong so KOSPI 200 determined at 2023 May 13. Our goal was to predict whether stock price(closed price) will increase or decrease when Financial Statements is announced. We set target variable by following :
 
