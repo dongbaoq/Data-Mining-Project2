@@ -65,6 +65,11 @@ We differed seed number and generated different 10 fold. We drew error bar plot 
 
 ## Model Performance and Inference
 
-Applying best model (Random forest with 5 parameter selection on each branch, using 1500 trees) performs on test set as below. This is confusion matrix.
+Applying best model (Random forest with 5 parameter selection on each branch, using 1500 trees) performs on test set as below. Following is confusion matrix.
 
+| Actual \ Predicted | Price Increase | Price Decrease |
+|--------------------|----------------|----------------|
+| Price Increase     | 115            | 62             |
+| Price Decrease     | 46             | 110            |
 
+The training Cross Validation accuracy was 0.7117 while test set accuracy was 0.6757
